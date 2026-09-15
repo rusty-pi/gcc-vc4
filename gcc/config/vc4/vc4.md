@@ -1060,11 +1060,15 @@
 (define_expand "call"
   [(call (match_operand 0 "" "") (match_operand 1 "" ""))]
   ""
-  ""
+{
+  rtx addr = XEXP (operands[0], 0);
+  if (!REG_P (addr) && !vc4_call_address_operand (addr, Pmode))
+    operands[0] = gen_rtx_MEM (GET_MODE (operands[0]), force_reg (Pmode, addr));
+}
 )
 
 (define_insn "*vc4_simple_call"
-  [(call (mem (match_operand 0 "immediate_operand" "i"))
+  [(call (mem (match_operand 0 "vc4_call_address_operand" "i"))
          (match_operand 1 "const_int_operand"))]
   ""
   "bl\t%0"
@@ -1085,12 +1089,16 @@
 	(call (match_operand 1 "" "")
 	      (match_operand 2 "" "")))]
   ""
-  ""
+{
+  rtx addr = XEXP (operands[1], 0);
+  if (!REG_P (addr) && !vc4_call_address_operand (addr, Pmode))
+    operands[1] = gen_rtx_MEM (GET_MODE (operands[1]), force_reg (Pmode, addr));
+}
 )
 
 (define_insn "*vc4_value_call"
   [(set (match_operand 0 "register_operand" "=r")
-	(call (mem (match_operand 1 "immediate_operand" "i"))
+	(call (mem (match_operand 1 "vc4_call_address_operand" "i"))
 	      (match_operand 2 "const_int_operand")))]
   ""
   "bl\t%1"

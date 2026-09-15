@@ -118,3 +118,8 @@
        (and (match_code "const_double")
 	    (match_test "real_equal (CONST_DOUBLE_REAL_VALUE (op),
 				     &dconst1)"))))
+
+;; Direct `bl` is pc-relative, so it only takes what the linker relocates:
+;; a constant address has to go through a register instead.
+(define_predicate "vc4_call_address_operand"
+  (match_code "symbol_ref,label_ref,const"))
