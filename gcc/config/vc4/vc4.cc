@@ -20,6 +20,8 @@
  * <http://www.gnu.org/licenses/>.  
  */
 
+#define IN_TARGET_CODE 1
+
 #include "config.h"
 #include "system.h"
 #include "coretypes.h"
@@ -28,9 +30,11 @@
 #include "tree.h"
 #include "rtl.h"
 #include "df.h"
+#include "memmodel.h"
 #include "alias.h"
 #include "fold-const.h"
 #include "stringpool.h"
+#include "attribs.h"
 #include "stor-layout.h"
 #include "calls.h"
 #include "varasm.h"
@@ -66,7 +70,6 @@
 #include "langhooks.h"
 #include "intl.h"
 #include "libfuncs.h"
-#include "params.h"
 #include "opts.h"
 #include "dumpfile.h"
 #include "gimple-expr.h"
@@ -158,15 +161,13 @@ static tree vc4_handle_naked_attribute(tree *, tree, tree, int, bool *);
  * VC4 specific attributes.  
  */
 
-static const struct attribute_spec vc4_attribute_table[] = {
-    /*
-     * { name, min_len, max_len, decl_req, type_req, fn_type_req, handler,
-     * affects_type_identity } 
-     */
-    {"naked", 0, 0, true, false, false, vc4_handle_naked_attribute,
-     false},
-    {NULL, 0, 0, false, false, false, NULL, false}
-};
+TARGET_GNU_ATTRIBUTES (vc4_attribute_table,
+{
+  /* { name, min_len, max_len, decl_req, type_req, fn_type_req,
+       affects_type_identity, handler, exclude } */
+  { "naked", 0, 0, true, false, false, false, vc4_handle_naked_attribute,
+    NULL }
+});
 
 
 /*
@@ -362,20 +363,20 @@ vc4_print_condition (FILE *stream, machine_mode mode, rtx_code code)
 {
   switch (mode)
     {
-    case CCmode:
-    case SImode:
+    case E_CCmode:
+    case E_SImode:
       vc4_print_cc_condition (stream, code);
       break;
 
-    case CCFPmode:
+    case E_CCFPmode:
       vc4_print_ccfp_condition (stream, code);
       break;
 
-    case CC_Zmode:
+    case E_CC_Zmode:
       vc4_print_ccz_condition (stream, code);
       break;
 
-    case CC_Cmode:
+    case E_CC_Cmode:
       vc4_print_ccc_condition (stream, code);
       break;
 
@@ -426,7 +427,7 @@ vc4_print_operand (FILE *stream, rtx x, int code)
       case 'd':
 	{
 	  gcc_assert (CONST_INT_P (x));
-	  asm_fprintf (stream, "%d", INTVAL (x) - 1);
+	  asm_fprintf (stream, "%wd", INTVAL (x) - 1);
 	}
 	break;
 
@@ -645,17 +646,17 @@ vc4_can_eliminate (const int from, const int to)
    argument of mode MODE and type TYPE.  */
 
 static int
-num_arg_regs (machine_mode mode, const_tree type)
+num_arg_regs (const function_arg_info &arg)
 {
   int size;
 
-  if (targetm.calls.must_pass_in_stack (mode, type))
+  if (targetm.calls.must_pass_in_stack (arg))
     return 0;
 
-  if (type && mode == BLKmode)
-    size = int_size_in_bytes (type);
+  if (arg.type && arg.mode == BLKmode)
+    size = int_size_in_bytes (arg.type);
   else
-    size = GET_MODE_SIZE (mode);
+    size = GET_MODE_SIZE (arg.mode);
 
   return ROUND_ADVANCE (size);
 }
@@ -664,7 +665,7 @@ num_arg_regs (machine_mode mode, const_tree type)
 
 static void
 vc4_setup_incoming_varargs (cumulative_args_t args_so_far_v,
-                            machine_mode, tree, int *ptr_pretend_size,
+                            const function_arg_info &, int *ptr_pretend_size,
                             int second_time ATTRIBUTE_UNUSED)
 {
   CUMULATIVE_ARGS *args_so_far = get_cumulative_args (args_so_far_v);
@@ -708,7 +709,7 @@ vc4_compute_frame (void)
   offsets->topreg = frame_pointer_needed ? HARD_FRAME_POINTER_REGNUM : 0;
 
   for (regno = 0; regno < FIRST_PSEUDO_REGISTER; regno++)
-    if (df_regs_ever_live_p (regno) && (!call_used_regs[regno]))
+    if (df_regs_ever_live_p (regno) && !call_used_or_fixed_reg_p (regno))
       offsets->topreg = regno;
 
   /* Check to see if lr needs saving. */
@@ -724,8 +725,7 @@ vc4_compute_frame (void)
 }
 
 static void
-vc4_target_asm_function_prologue (FILE *file,
-				  HOST_WIDE_INT size ATTRIBUTE_UNUSED)
+vc4_target_asm_function_prologue (FILE *file)
 {
   struct machine_function *offsets = vc4_compute_frame ();
 
@@ -743,8 +743,7 @@ vc4_target_asm_function_prologue (FILE *file,
 }
 
 static void
-vc4_target_asm_function_epilogue (FILE *file ATTRIBUTE_UNUSED,
-				  HOST_WIDE_INT size ATTRIBUTE_UNUSED)
+vc4_target_asm_function_epilogue (FILE *file ATTRIBUTE_UNUSED)
 {
 }
 
@@ -1187,7 +1186,7 @@ vc4_trampoline_init (rtx m_tramp, tree fndecl, rtx static_chain)
 
   rtx a_tramp = XEXP (m_tramp, 0);
   emit_library_call (gen_rtx_SYMBOL_REF (Pmode, "__clear_cache"),
-                     LCT_NORMAL, VOIDmode, 2, a_tramp, Pmode,
+                     LCT_NORMAL, VOIDmode, a_tramp, Pmode,
                      plus_constant (Pmode, a_tramp, TRAMPOLINE_SIZE), Pmode);
 }
 
@@ -1234,35 +1233,34 @@ vc4_function_value (const_tree valtype, const_tree func ATTRIBUTE_UNUSED,
  */
 
 static rtx
-vc4_function_arg (cumulative_args_t cum, machine_mode mode,
-		  const_tree type, bool named)
+vc4_function_arg (cumulative_args_t cum, const function_arg_info &arg)
 {
   int arg_reg;
 
-  if (!named || mode == VOIDmode)
+  if (!arg.named || arg.end_marker_p ())
     return 0;
 
-  if (targetm.calls.must_pass_in_stack (mode, type))
+  if (targetm.calls.must_pass_in_stack (arg))
     return 0;
 
   arg_reg = *get_cumulative_args (cum);
 
   if (arg_reg < NPARM_REGS)
-    return gen_rtx_REG (mode, arg_reg + FIRST_PARM_REG);
+    return gen_rtx_REG (arg.mode, arg_reg + FIRST_PARM_REG);
 
   return 0;
 }
 
 static void
-vc4_function_arg_advance (cumulative_args_t cum_v, machine_mode mode,
-			  const_tree type, bool named)
+vc4_function_arg_advance (cumulative_args_t cum_v,
+			  const function_arg_info &arg)
 {
   CUMULATIVE_ARGS *cum = get_cumulative_args (cum_v);
 
-  if (!named)
+  if (!arg.named)
     return;
 
-  (*cum) += num_arg_regs (mode, type);
+  (*cum) += num_arg_regs (arg);
 }
 
 static unsigned int
@@ -1279,22 +1277,21 @@ vc4_function_arg_boundary (machine_mode /*mode*/, const_tree /*type*/)
    to the function.  */
 
 static int
-vc4_arg_partial_bytes (cumulative_args_t cum, machine_mode mode,
-                       tree type, bool named)
+vc4_arg_partial_bytes (cumulative_args_t cum, const function_arg_info &arg)
 {
   int reg = *get_cumulative_args (cum);
 
-  if (named == 0)
+  if (!arg.named)
     return 0;
 
-  if (targetm.calls.must_pass_in_stack (mode, type))
+  if (targetm.calls.must_pass_in_stack (arg))
     return 0;
 
   if (reg >= NPARM_REGS)
     return 0;
 
   /* If the argument fits entirely in registers, return 0.  */
-  if (reg + num_arg_regs (mode, type) <= NPARM_REGS)
+  if (reg + num_arg_regs (arg) <= NPARM_REGS)
     return 0;
 
   /* The argument overflows the number of available argument registers.
@@ -1330,10 +1327,11 @@ vc4_set_return_address (rtx source, rtx scratch ATTRIBUTE_UNUSED)
     }
 }
 
-void
-vc4_asm_output_mi_thunk (FILE *file, tree, HOST_WIDE_INT delta,
+static void
+vc4_asm_output_mi_thunk (FILE *file, tree thunk, HOST_WIDE_INT delta,
 			 HOST_WIDE_INT, tree function)
 {
+  const char *fnname = IDENTIFIER_POINTER (DECL_ASSEMBLER_NAME (thunk));
   int mi_delta = delta;
   const char *const mi_op = mi_delta < 0 ? "sub" : "add";
   int this_regno = (aggregate_value_p (TREE_TYPE (TREE_TYPE (function)),
@@ -1342,6 +1340,7 @@ vc4_asm_output_mi_thunk (FILE *file, tree, HOST_WIDE_INT delta,
   if (mi_delta < 0)
     mi_delta = -mi_delta;
 
+  assemble_start_function (thunk, fnname);
   final_start_function (emit_barrier (), file, 1);
 
   asm_fprintf (file, "\t%s\t%r,#%d\n", mi_op, this_regno, mi_delta);
@@ -1350,6 +1349,7 @@ vc4_asm_output_mi_thunk (FILE *file, tree, HOST_WIDE_INT delta,
   fputc ('\n', file);
 
   final_end_function ();
+  assemble_end_function (thunk, fnname);
 }
 
 
@@ -1386,8 +1386,8 @@ static bool vc4_warn_func_return(tree decl)
     return lookup_attribute("naked", DECL_ATTRIBUTES(decl)) == NULL_TREE;
 }
 
-bool
-vc4_hard_regno_mode_ok (int regno, machine_mode mode)
+static bool
+vc4_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
 {
   if (GET_MODE_CLASS (mode) == MODE_CC)
     return regno == CC_REGNO;
@@ -1395,6 +1395,19 @@ vc4_hard_regno_mode_ok (int regno, machine_mode mode)
   return (regno < AP_REG
 	  || regno == ARG_POINTER_REGNUM
 	  || regno == FRAME_POINTER_REGNUM);
+}
+
+/* TARGET_C_MODE_FOR_FLOATING_TYPE: with -msingle-float, double and long
+   double use the hardware-supported 32-bit format.  */
+
+static machine_mode
+vc4_c_mode_for_floating_type (enum tree_index ti)
+{
+  if (TARGET_SINGLE_FLOAT
+      && (ti == TI_DOUBLE_TYPE || ti == TI_LONG_DOUBLE_TYPE))
+    return SFmode;
+
+  return default_mode_for_floating_type (ti);
 }
 
 /* TARGET_RETURN_IN_MEMORY: decides whether a value can be returned in
@@ -1647,7 +1660,8 @@ vc4_legitimate_address_p_1 (machine_mode mode, rtx x, bool strict_p)
 }
 
 static bool
-vc4_legitimate_address_p (machine_mode mode, rtx x, bool strict)
+vc4_legitimate_address_p (machine_mode mode, rtx x, bool strict,
+			  code_helper = ERROR_MARK)
 {
   bool res;
 
@@ -1848,6 +1862,18 @@ vc4_valid_float_immediate (rtx x)
 
 #undef TARGET_LRA_P
 #define TARGET_LRA_P hook_bool_void_true
+
+#undef TARGET_HARD_REGNO_MODE_OK
+#define TARGET_HARD_REGNO_MODE_OK vc4_hard_regno_mode_ok
+
+#undef TARGET_MODES_TIEABLE_P
+#define TARGET_MODES_TIEABLE_P hook_bool_mode_mode_true
+
+#undef TARGET_C_MODE_FOR_FLOATING_TYPE
+#define TARGET_C_MODE_FOR_FLOATING_TYPE vc4_c_mode_for_floating_type
+
+#undef TARGET_CONSTANT_ALIGNMENT
+#define TARGET_CONSTANT_ALIGNMENT constant_alignment_word_strings
 
 #undef TARGET_ASM_FUNCTION_PROLOGUE
 #define TARGET_ASM_FUNCTION_PROLOGUE    vc4_target_asm_function_prologue
