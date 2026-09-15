@@ -284,6 +284,26 @@
    (set_attr "predicable" "no,yes,yes")]
 )
 
+;; There is no byte-reverse instruction. Without this GCC falls back to a
+;; __bswapsi2 libcall, which a libgcc built with this same compiler would
+;; implement by calling itself.
+(define_expand "bswapsi2"
+  [(set (match_operand:SI 0 "s_register_operand" "")
+	(bswap:SI (match_operand:SI 1 "s_register_operand" "")))]
+  ""
+{
+  rtx even = gen_reg_rtx (SImode);
+  rtx odd = gen_reg_rtx (SImode);
+  emit_insn (gen_andsi3 (even, operands[1],
+			 force_reg (SImode, gen_int_mode (0x00ff00ff, SImode))));
+  emit_insn (gen_andsi3 (odd, operands[1],
+			 force_reg (SImode, gen_int_mode (0xff00ff00, SImode))));
+  emit_insn (gen_rotrsi3 (even, even, GEN_INT (8)));
+  emit_insn (gen_rotrsi3 (odd, odd, GEN_INT (24)));
+  emit_insn (gen_iorsi3 (operands[0], even, odd));
+  DONE;
+})
+
 (define_insn "mulsi3"
   [(set (match_operand:SI 0 "s_register_operand"   "=f,  f,r,  r,  r,r")
         (mult:SI
