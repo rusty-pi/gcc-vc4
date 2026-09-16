@@ -57,6 +57,10 @@ jobs:
 
       - name: Package
         run: |
+          # The info directory index is shared by both vc4-elf packages, so
+          # neither may ship it.
+          rm -f "pkg$PREFIX/share/info/dir"
+
           version="$(cat src/gcc/BASE-VER)"
           version="$version+git$(git -C src log -1 --format=%cd --date=format:%Y%m%d).$(git -C src rev-parse --short=10 HEAD)"
 
