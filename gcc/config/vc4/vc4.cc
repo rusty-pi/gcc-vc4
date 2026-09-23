@@ -1795,6 +1795,97 @@ vc4_valid_float_immediate (rtx x)
   return true;
 }
 
+/* The largest block worth opening up rather than calling the library for,
+   in bytes: a word move is a load and a store, so the aligned limit is
+   sixteen of each, and an unaligned block costs four times that per byte.  */
+#define VC4_BLOCK_WORDWISE 64
+#define VC4_BLOCK_BYTEWISE 16
+
+/* The widest mode that may be used for a piece of a block at OFFSET, given
+   the block's ALIGN and the SIZE still to go.  The core faults on an
+   unaligned word, so the offset has to carry the alignment too.  */
+
+static machine_mode
+vc4_block_piece (HOST_WIDE_INT offset, HOST_WIDE_INT align,
+		 HOST_WIDE_INT size)
+{
+  if (size >= 4 && align >= 4 && offset % 4 == 0)
+    return SImode;
+  if (size >= 2 && align >= 2 && offset % 2 == 0)
+    return HImode;
+  return QImode;
+}
+
+/* Expand a block copy of a known, small size into loads and stores, the way
+   `__builtin_memcpy' of a few bytes is meant to go.  Returns true when it
+   took the copy, false to leave it to the library.  */
+
+bool
+vc4_expand_cpymem (rtx dest, rtx src, rtx size_rtx, rtx align_rtx)
+{
+  if (!CONST_INT_P (size_rtx) || !CONST_INT_P (align_rtx))
+    return false;
+
+  HOST_WIDE_INT size = INTVAL (size_rtx);
+  HOST_WIDE_INT align = INTVAL (align_rtx);
+  HOST_WIDE_INT limit = align >= 4 ? VC4_BLOCK_WORDWISE : VC4_BLOCK_BYTEWISE;
+
+  if (size <= 0 || size > limit)
+    return false;
+
+  for (HOST_WIDE_INT offset = 0; offset < size; )
+    {
+      machine_mode mode = vc4_block_piece (offset, align, size - offset);
+      rtx reg = gen_reg_rtx (mode);
+      emit_move_insn (reg, adjust_address (src, mode, offset));
+      emit_move_insn (adjust_address (dest, mode, offset), reg);
+      offset += GET_MODE_SIZE (mode);
+    }
+
+  return true;
+}
+
+/* The same for `__builtin_memset' of a known, small size and a constant
+   byte.  */
+
+bool
+vc4_expand_setmem (rtx dest, rtx size_rtx, rtx val_rtx, rtx align_rtx)
+{
+  if (!CONST_INT_P (size_rtx) || !CONST_INT_P (val_rtx)
+      || !CONST_INT_P (align_rtx))
+    return false;
+
+  HOST_WIDE_INT size = INTVAL (size_rtx);
+  HOST_WIDE_INT align = INTVAL (align_rtx);
+  HOST_WIDE_INT limit = align >= 4 ? VC4_BLOCK_WORDWISE : VC4_BLOCK_BYTEWISE;
+
+  if (size <= 0 || size > limit)
+    return false;
+
+  unsigned HOST_WIDE_INT byte = INTVAL (val_rtx) & 0xff;
+  /* One register holds the byte spread over a word; the narrower stores
+     take their own low part of it.  */
+  rtx word = NULL_RTX;
+
+  for (HOST_WIDE_INT offset = 0; offset < size; )
+    {
+      machine_mode mode = vc4_block_piece (offset, align, size - offset);
+
+      if (word == NULL_RTX)
+	{
+	  word = gen_reg_rtx (SImode);
+	  emit_move_insn (word, GEN_INT (trunc_int_for_mode
+					 (byte * 0x01010101U, SImode)));
+	}
+
+      rtx val = mode == SImode ? word : gen_lowpart (mode, word);
+      emit_move_insn (adjust_address (dest, mode, offset), val);
+      offset += GET_MODE_SIZE (mode);
+    }
+
+  return true;
+}
+
 /*
  * Initialize the GCC target structure.  
  */

@@ -41,6 +41,8 @@ extern void vc4_set_return_address (rtx, rtx);
 extern bool vc4_shiftable_const (HOST_WIDE_INT);
 #ifdef RTX_CODE
 extern machine_mode vc4_select_cc_mode (RTX_CODE, rtx, rtx);
+extern bool vc4_expand_cpymem (rtx, rtx, rtx, rtx);
+extern bool vc4_expand_setmem (rtx, rtx, rtx, rtx);
 #endif
 extern bool vc4_valid_float_immediate (rtx x);
 #endif

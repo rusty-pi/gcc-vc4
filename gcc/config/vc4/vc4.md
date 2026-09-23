@@ -1238,6 +1238,36 @@
    (set_attr "predicable" "no")]
 )
 
+;; --- Block moves ----------------------------------------------------------
+
+;; A few bytes are cheaper opened up than handed to the library, which has to
+;; work out the alignment of both ends before it can move anything. Sizes the
+;; expanders will not take fall back to the call.
+
+(define_expand "cpymemsi"
+  [(parallel [(set (match_operand:BLK 0 "memory_operand")
+		   (match_operand:BLK 1 "memory_operand"))
+	      (use (match_operand:SI 2 ""))
+	      (use (match_operand:SI 3 "const_int_operand"))])]
+  ""
+{
+  if (vc4_expand_cpymem (operands[0], operands[1], operands[2], operands[3]))
+    DONE;
+  FAIL;
+})
+
+(define_expand "setmemsi"
+  [(parallel [(set (match_operand:BLK 0 "memory_operand")
+		   (match_operand:QI 2 ""))
+	      (use (match_operand:SI 1 ""))
+	      (use (match_operand:SI 3 "const_int_operand"))])]
+  ""
+{
+  if (vc4_expand_setmem (operands[0], operands[1], operands[2], operands[3]))
+    DONE;
+  FAIL;
+})
+
 ;; --- Conditionals ---------------------------------------------------------
 
 ;; Combined test-and-branch instructions.
