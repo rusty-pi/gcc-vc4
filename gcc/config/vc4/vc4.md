@@ -1316,6 +1316,52 @@
   DONE;
 })
 
+;; Store a comparison result as 0 or 1.  VC4 has no set-flag instruction, but
+;; most ALU operations are predicable, so a pair of moves does it without
+;; branching.
+
+(define_expand "cstore_cc"
+  [(set (match_operand:SI 0 "s_register_operand" "")
+	(match_operator:SI 1 "" [(match_operand 2 "" "")
+				 (match_operand 3 "" "")]))]
+  ""
+{
+  machine_mode mode = SELECT_CC_MODE (GET_CODE (operands[1]), operands[2],
+				      operands[3]);
+  rtx cc_reg = gen_rtx_REG (mode, CC_REGNO);
+
+  emit_insn (gen_rtx_SET (cc_reg, gen_rtx_COMPARE (mode, operands[2],
+						   operands[3])));
+
+  operands[2] = cc_reg;
+  operands[3] = const0_rtx;
+})
+
+(define_expand "cstoresi4"
+  [(set (match_operand:SI 0 "s_register_operand" "")
+	(match_operator:SI 1 "ordered_comparison_operator"
+	  [(match_operand:SI 2 "s_register_operand" "")
+	   (match_operand:SI 3 "alu_rhs_operand" "")]))]
+  ""
+{
+  emit_insn (gen_cstore_cc (operands[0], operands[1], operands[2],
+			   operands[3]));
+  DONE;
+})
+
+
+(define_expand "cstoresf4"
+  [(set (match_operand:SI 0 "s_register_operand" "")
+	(match_operator:SI 1 "ordered_comparison_operator"
+	  [(match_operand:SF 2 "s_register_operand" "")
+	   (match_operand:SF 3 "s_register_operand" "")]))]
+  ""
+{
+  emit_insn (gen_cstore_cc (operands[0], operands[1], operands[2],
+			   operands[3]));
+  DONE;
+})
+
 ;; This is disabled for now because it doesn't understand limited offset range.
 
 ;(define_insn "*vc4_test_and_branch_<condition:code>"
@@ -1438,6 +1484,18 @@
 	       (lt (minus (match_dup 0) (pc)) (const_int 126)))
 	  (const_int 2)
 	  (const_int 4)))
+   (set_attr "predicable" "no")]
+)
+
+(define_insn "*vc4_cstore"
+  [(set (match_operand:SI 0 "s_register_operand" "=f,r")
+	(match_operator:SI 1 "ordered_comparison_operator"
+	  [(match_operand 2 "cc_register" "") (const_int 0)]))]
+  ""
+  "@
+  mov.s\t%0,#0\;mov.%c1.m\t%0,#1
+  mov.m\t%0,#0\;mov.%c1.m\t%0,#1"
+  [(set_attr "length" "6,8")
    (set_attr "predicable" "no")]
 )
 
