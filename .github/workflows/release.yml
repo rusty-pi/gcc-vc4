@@ -41,6 +41,11 @@ jobs:
             "./$BINUTILS.deb"
           rm "$BINUTILS.deb"
 
+      # The runner's compiler defaults to x86-64-v3, and the host half of this
+      # package -- the driver, and libgccjit, which rustc_codegen_gcc dlopens
+      # -- then runs on nothing older than the builder (SIGILL on the first
+      # VEX instruction). x86-64-v2 is what the oldest host this is installed
+      # on has. It says nothing about the code generated for vc4-elf.
       - name: Build
         run: |
           mkdir build
@@ -51,7 +56,10 @@ jobs:
             --disable-multilib --without-headers --with-newlib --disable-nls \
             --disable-shared --disable-threads --disable-libssp --disable-libquadmath \
             --disable-libatomic --disable-libgomp --disable-lto --disable-libstdcxx \
-            --enable-checking=release --disable-werror
+            --enable-checking=release --disable-werror \
+            CFLAGS="-O2 -march=x86-64-v2 -mtune=generic" \
+            CXXFLAGS="-O2 -march=x86-64-v2 -mtune=generic" \
+            CFLAGS_FOR_TARGET="-O2 -g" CXXFLAGS_FOR_TARGET="-O2 -g"
           make -j"$(nproc)" all-gcc all-target-libgcc
           make install-strip-gcc install-strip-target-libgcc DESTDIR="$GITHUB_WORKSPACE/pkg"
 
