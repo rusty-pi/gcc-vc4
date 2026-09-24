@@ -18,7 +18,12 @@ concurrency:
 
 jobs:
   deb:
-    runs-on: ubuntu-26.04
+    # Not ubuntu-26.04: that image's own C runtime is built for x86-64-v3, so
+    # everything linked there is marked as needing it and the loader refuses
+    # to start it on an older x86 ("CPU ISA level is lower than required") --
+    # a Celeron N5105 self-hosted runner, for one. This image's is baseline,
+    # and what is built against an older glibc runs on a newer one.
+    runs-on: ubuntu-24.04
     env:
       PREFIX: /opt/vc4
       PACKAGE: vc4-elf-gcc
